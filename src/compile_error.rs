@@ -1,24 +1,24 @@
 #[derive(Clone, Copy, Debug)]
-pub enum CompilerErrorLevel {
+pub enum CompileErrorLevel {
     Warning,
     Error,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum CompilerStage {
+pub enum CompileStage {
     Compile,
     Link,
 }
 
 #[derive(Clone, Debug)]
-pub struct CompilerError {
-    level: CompilerErrorLevel,
-    stage: CompilerStage,
+pub struct CompileError {
+    level: CompileErrorLevel,
+    stage: CompileStage,
     content: String,
 }
 
-impl CompilerError {
-    pub fn new(level: CompilerErrorLevel, stage: CompilerStage, content: &str) -> Self {
+impl CompileError {
+    pub fn new(level: CompileErrorLevel, stage: CompileStage, content: &str) -> Self {
         Self {
             level,
             stage,
@@ -27,21 +27,21 @@ impl CompilerError {
     }
 
     pub fn process(&self) {
-        let mut info = String::from("Compiler ");
+        let mut info = String::from("SCCompiler ");
         info += match self.stage {
-            CompilerStage::Compile => "compile ",
-            CompilerStage::Link => "link ",
+            CompileStage::Compile => "compile ",
+            CompileStage::Link => "link ",
         };
         info += "stage ";
         info += match self.level {
-            CompilerErrorLevel::Warning => "warning: ",
-            CompilerErrorLevel::Error => "error: ",
+            CompileErrorLevel::Warning => "warning: ",
+            CompileErrorLevel::Error => "error: ",
         };
         info += &self.content;
 
         match self.level {
-            CompilerErrorLevel::Warning => println!("{info}"),
-            CompilerErrorLevel::Error => panic!("{info}"),
+            CompileErrorLevel::Warning => println!("{info}"),
+            CompileErrorLevel::Error => panic!("{info}"),
         };
     }
 }

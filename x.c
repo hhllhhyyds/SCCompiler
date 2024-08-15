@@ -4,6 +4,13 @@ struct Point
     int y;
 };
 
+/*** comment
+ * 
+ * fsdf
+ */
+
+/* sdfdsf*/
+
 int main() 
 {
     int arr[10];
@@ -23,5 +30,5 @@ int main()
             printf("arr[%d] = %d", i, arr[i]);
         }
     }
-    printf("pt.x = %d, pt.y = %d", pt.x, pt.y);
+    printf("/// \npt\t.x = %d, pt.y = %d", pt.x, pt.y);
 }

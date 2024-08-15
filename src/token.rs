@@ -54,18 +54,16 @@ pub enum Seperator {
     Comma,
     /// "..."
     Ellipsis,
-    /// End of file
-    Eof,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConstVar {
     /// const int
-    Cint(i32),
+    Int(i32),
     /// const char
-    Cchar(char),
+    Char(char),
     /// const string
-    Cstring(String),
+    String(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, EnumIter)]
@@ -130,13 +128,12 @@ impl Token {
                 Seperator::Semicolon => ";",
                 Seperator::Comma => ",",
                 Seperator::Ellipsis => "...",
-                Seperator::Eof => "End of file",
             }
             .to_string(),
             Token::Cvar(c) => match c {
-                ConstVar::Cint(x) => x.to_string(),
-                ConstVar::Cchar(c) => c.to_string(),
-                ConstVar::Cstring(s) => s.clone(),
+                ConstVar::Int(x) => x.to_string(),
+                ConstVar::Char(c) => c.to_string(),
+                ConstVar::String(s) => s.clone(),
             },
             Token::Kw(kw) => match kw {
                 KeyWord::Char => "char",

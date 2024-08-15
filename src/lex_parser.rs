@@ -1,5 +1,5 @@
 use crate::{
-    compile_error::{CompilerError, CompilerErrorLevel, CompilerStage},
+    compile_error::{CompileError, CompileErrorLevel, CompileStage},
     token::{ConstVar, KeyWord, Operator, Seperator, Token},
 };
 use std::collections::{HashMap, VecDeque};
@@ -81,9 +81,9 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                     self.move_char();
                     Some(Token::Op(Operator::Neq))
                 } else {
-                    CompilerError::new(
-                        CompilerErrorLevel::Error,
-                        CompilerStage::Compile,
+                    CompileError::new(
+                        CompileErrorLevel::Error,
+                        CompileStage::Compile,
                         &format!("暂不支持 '!' (非操作符): line {}", self.line_num),
                     )
                     .process();
@@ -116,9 +116,9 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                         self.move_char();
                         Some(Token::Sep(Seperator::Ellipsis))
                     } else {
-                        CompilerError::new(
-                            CompilerErrorLevel::Error,
-                            CompilerStage::Compile,
+                        CompileError::new(
+                            CompileErrorLevel::Error,
+                            CompileStage::Compile,
                             &format!("省略号拼写错误: line {}", self.line_num),
                         )
                         .process();
@@ -131,9 +131,9 @@ impl<I: Iterator<Item = char>> LexParser<I> {
             '\'' | '\"' => self.parse_string(ch),
             _ => {
                 self.move_char();
-                CompilerError::new(
-                    CompilerErrorLevel::Error,
-                    CompilerStage::Compile,
+                CompileError::new(
+                    CompileErrorLevel::Error,
+                    CompileStage::Compile,
                     &format!("不认识的字符: {ch}: line {}", self.line_num),
                 )
                 .process();
@@ -144,11 +144,10 @@ impl<I: Iterator<Item = char>> LexParser<I> {
 
     #[inline]
     fn move_char(&mut self) {
-        if let Some(ch) = self.temp_queue.pop_front() {
-            self.ch = ch;
-        } else {
-            self.ch = self.char_stream.next()
-        }
+        self.ch = self
+            .temp_queue
+            .pop_front()
+            .unwrap_or(self.char_stream.next())
     }
 
     #[inline]
@@ -165,36 +164,44 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                 if ch == start {
                     break;
                 } else if ch == '\\' {
-                    s.push(ch);
                     self.move_char();
-                    let c = match ch {
-                        '0' => '\0',
-                        't' => '\t',
-                        'n' => '\n',
-                        'r' => '\r',
-                        '\'' => '\'',
-                        '\"' => '\"',
-                        '\\' => '\\',
-                        _ => {
-                            CompilerError::new(
-                                CompilerErrorLevel::Error,
-                                CompilerStage::Compile,
-                                &format!("未识别的转义字符: {}: line {}", ch, self.line_num),
-                            )
-                            .process();
-                            return None;
+
+                    s.push(if let Some(ch) = self.current_char() {
+                        match ch {
+                            '0' => '\0',
+                            't' => '\t',
+                            'n' => '\n',
+                            'r' => '\r',
+                            '\'' | '\"' | '\\' => ch,
+                            _ => {
+                                CompileError::new(
+                                    CompileErrorLevel::Error,
+                                    CompileStage::Compile,
+                                    &format!("未识别的转义字符: {}: line {}", ch, self.line_num),
+                                )
+                                .process();
+                                return None;
+                            }
                         }
-                    };
-                    s.push(c);
+                    } else {
+                        CompileError::new(
+                            CompileErrorLevel::Error,
+                            CompileStage::Compile,
+                            &format!("转义字符后为空: {}: line {}", ch, self.line_num),
+                        )
+                        .process();
+                        return None;
+                    });
+
                     self.move_char();
                 } else {
                     s.push(ch);
                     self.move_char()
                 }
             } else {
-                CompilerError::new(
-                    CompilerErrorLevel::Error,
-                    CompilerStage::Compile,
+                CompileError::new(
+                    CompileErrorLevel::Error,
+                    CompileStage::Compile,
                     &format!("引号不闭合: line {}", self.line_num),
                 )
                 .process();
@@ -206,9 +213,10 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         self.move_char();
 
         if start == '\'' {
-            Some(Token::Cvar(ConstVar::Cchar(s.chars().next().unwrap())))
+            assert!(s.chars().count() == 1);
+            Some(Token::Cvar(ConstVar::Char(s.chars().next().unwrap())))
         } else {
-            Some(Token::Cvar(ConstVar::Cstring(s)))
+            Some(Token::Cvar(ConstVar::String(s)))
         }
     }
 
@@ -229,7 +237,7 @@ impl<I: Iterator<Item = char>> LexParser<I> {
 
         let int_var: i32 = s.parse().unwrap();
 
-        Some(Token::Cvar(ConstVar::Cint(int_var)))
+        Some(Token::Cvar(ConstVar::Int(int_var)))
     }
 
     fn parse_identifier(&mut self, start: char) -> Option<Token> {
@@ -255,7 +263,7 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         if self.current_char().is_some() {
             loop {
                 if WHITE_SPACE_CHARS.contains(&self.current_char().unwrap()) {
-                    self.skip_with_space();
+                    self.skip_space();
                 } else if self.current_char().filter(|c| *c == '/').is_some() {
                     self.move_char();
                     if self.current_char().filter(|c| *c == '*').is_some() {
@@ -277,7 +285,7 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         loop {
             while self
                 .current_char()
-                .filter(|c| !['\n', '*'].contains(c))
+                .filter(|c| !(['\n', '*'].contains(c)))
                 .is_some()
             {
                 self.move_char();
@@ -289,12 +297,12 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '/').is_some() {
                     self.move_char();
+                    return;
                 }
-                return;
             } else {
-                CompilerError::new(
-                    CompilerErrorLevel::Error,
-                    CompilerStage::Compile,
+                CompileError::new(
+                    CompileErrorLevel::Error,
+                    CompileStage::Compile,
                     "一直到文件尾未看到配对的注释结束符",
                 )
                 .process();
@@ -303,13 +311,13 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         }
     }
 
-    fn skip_with_space(&mut self) {
+    fn skip_space(&mut self) {
         while let Some(ch) = self
             .current_char()
             .filter(|c| WHITE_SPACE_CHARS.contains(c))
         {
             self.move_char();
-            if ['\r', '\n'].contains(&ch) {
+            if ch == '\n' {
                 self.line_num += 1;
             }
             print!("{ch}")
@@ -342,7 +350,27 @@ mod tests {
             stdout
                 .set_color(ColorSpec::new().set_fg(Some(color)))
                 .unwrap();
-            write!(&mut stdout, "{}", token.get_string()).unwrap();
+            match token {
+                Token::Cvar(ConstVar::String(s)) => {
+                    for ch in s.chars() {
+                        let s = ch.to_string();
+                        write!(
+                            &mut stdout,
+                            "{}",
+                            match ch {
+                                '\0' => "\\0",
+                                '\t' => "\\t",
+                                '\n' => "\\n",
+                                '\r' => "\\r",
+                                '\\' => "\\\\",
+                                _ => &s,
+                            }
+                        )
+                        .unwrap()
+                    }
+                }
+                _ => write!(&mut stdout, "{}", token.get_string()).unwrap(),
+            }
         }
         stdout.set_color(ColorSpec::new().set_fg(None)).unwrap();
         println!("\n");
