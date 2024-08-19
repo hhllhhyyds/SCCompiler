@@ -1,16 +1,16 @@
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompileErrorLevel {
     Warning,
     Error,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompileStage {
     Compile,
     Link,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompileError {
     level: CompileErrorLevel,
     stage: CompileStage,
@@ -24,6 +24,14 @@ impl CompileError {
             stage,
             content: String::from(content),
         }
+    }
+
+    pub fn compile_stage_error(content: &str) -> Self {
+        Self::new(CompileErrorLevel::Error, CompileStage::Compile, content)
+    }
+
+    pub fn error_message(&self) -> String {
+        self.content.clone()
     }
 
     pub fn process(&self) {

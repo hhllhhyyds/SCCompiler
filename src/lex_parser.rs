@@ -1,11 +1,16 @@
 use crate::{
-    compile_error::{CompileError, CompileErrorLevel, CompileStage},
+    compile_error::CompileError,
     token::{ConstVar, KeyWord, Operator, Seperator, Token},
 };
 use std::collections::{HashMap, VecDeque};
 use strum::IntoEnumIterator;
 
-const WHITE_SPACE_CHARS: [char; 4] = [' ', '\t', '\r', '\n'];
+const WHITE_SPACE_CHARS: [char; 3] = [' ', '\t', '\n'];
+macro_rules! is_white_space {
+    ($c: ident) => {
+        WHITE_SPACE_CHARS.contains($c)
+    };
+}
 
 #[derive(Clone, Debug)]
 pub struct LexParser<I: Iterator<Item = char>> {
@@ -45,67 +50,66 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         }
     }
 
-    pub fn next_token(&mut self) -> Option<Token> {
-        self.preprocess();
+    pub fn next_token(&mut self) -> Result<Option<Token>, CompileError> {
+        self.preprocess()?;
 
-        let ch = self.current_char()?;
+        let Some(ch) = self.current_char() else {
+            return Ok(None);
+        };
 
         match ch {
-            'a'..='z' | 'A'..='Z' | '_' => self.parse_identifier(ch),
-            '0'..='9' => self.parse_num(ch),
+            'a'..='z' | 'A'..='Z' | '_' => Ok(Some(self.parse_identifier(ch))),
+            '0'..='9' => self.parse_num(ch).map(Some),
             '+' | '*' | '/' | '%' | '&' | ';' | ',' | '(' | ')' | '[' | ']' | '{' | '}' => {
                 self.move_char();
-                Some(self.word_table.get(&ch.to_string()).cloned().unwrap())
+                Ok(Some(self.word_table.get(&ch.to_string()).cloned().unwrap()))
             }
             '-' => {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '>').is_some() {
                     self.move_char();
-                    Some(Token::Op(Operator::PointsTo))
+                    Ok(Some(Token::Op(Operator::PointsTo)))
                 } else {
-                    Some(Token::Op(Operator::Minus))
+                    Ok(Some(Token::Op(Operator::Minus)))
                 }
             }
             '=' => {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '=').is_some() {
                     self.move_char();
-                    Some(Token::Op(Operator::Eq))
+                    Ok(Some(Token::Op(Operator::Eq)))
                 } else {
-                    Some(Token::Op(Operator::Assign))
+                    Ok(Some(Token::Op(Operator::Assign)))
                 }
             }
             '!' => {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '=').is_some() {
                     self.move_char();
-                    Some(Token::Op(Operator::Neq))
+                    Ok(Some(Token::Op(Operator::Neq)))
                 } else {
-                    CompileError::new(
-                        CompileErrorLevel::Error,
-                        CompileStage::Compile,
-                        &format!("暂不支持 '!' (非操作符): line {}", self.line_num),
-                    )
-                    .process();
-                    None
+                    Err(CompileError::compile_stage_error(&format!(
+                        "暂不支持 '!' (非操作符): line {}",
+                        self.line_num
+                    )))
                 }
             }
             '>' => {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '=').is_some() {
                     self.move_char();
-                    Some(Token::Op(Operator::Geq))
+                    Ok(Some(Token::Op(Operator::Geq)))
                 } else {
-                    Some(Token::Op(Operator::Gt))
+                    Ok(Some(Token::Op(Operator::Gt)))
                 }
             }
             '<' => {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '=').is_some() {
                     self.move_char();
-                    Some(Token::Op(Operator::Leq))
+                    Ok(Some(Token::Op(Operator::Leq)))
                 } else {
-                    Some(Token::Op(Operator::Lt))
+                    Ok(Some(Token::Op(Operator::Lt)))
                 }
             }
             '.' => {
@@ -114,30 +118,24 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                     self.move_char();
                     if self.current_char().filter(|c| *c == '.').is_some() {
                         self.move_char();
-                        Some(Token::Sep(Seperator::Ellipsis))
+                        Ok(Some(Token::Sep(Seperator::Ellipsis)))
                     } else {
-                        CompileError::new(
-                            CompileErrorLevel::Error,
-                            CompileStage::Compile,
-                            &format!("省略号拼写错误: line {}", self.line_num),
-                        )
-                        .process();
-                        None
+                        Err(CompileError::compile_stage_error(&format!(
+                            "省略号拼写错误: line {}",
+                            self.line_num
+                        )))
                     }
                 } else {
-                    Some(Token::Op(Operator::Dot))
+                    Ok(Some(Token::Op(Operator::Dot)))
                 }
             }
-            '\'' | '\"' => self.parse_string(ch),
+            '\'' | '\"' => self.parse_string(ch).map(Some),
             _ => {
                 self.move_char();
-                CompileError::new(
-                    CompileErrorLevel::Error,
-                    CompileStage::Compile,
-                    &format!("不认识的字符: {ch}: line {}", self.line_num),
-                )
-                .process();
-                None
+                Err(CompileError::compile_stage_error(&format!(
+                    "不认识的字符: {ch}: line {}",
+                    self.line_num
+                )))
             }
         }
     }
@@ -155,7 +153,7 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         self.ch
     }
 
-    fn parse_string(&mut self, start: char) -> Option<Token> {
+    fn parse_string(&mut self, start: char) -> Result<Token, CompileError> {
         let mut s = start.to_string();
         self.move_char();
 
@@ -174,23 +172,17 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                             'r' => '\r',
                             '\'' | '\"' | '\\' => ch,
                             _ => {
-                                CompileError::new(
-                                    CompileErrorLevel::Error,
-                                    CompileStage::Compile,
-                                    &format!("未识别的转义字符: {}: line {}", ch, self.line_num),
-                                )
-                                .process();
-                                return None;
+                                return Err(CompileError::compile_stage_error(&format!(
+                                    "未识别的转义字符: {}: line {}",
+                                    ch, self.line_num
+                                )))
                             }
                         }
                     } else {
-                        CompileError::new(
-                            CompileErrorLevel::Error,
-                            CompileStage::Compile,
-                            &format!("转义字符后为空: {}: line {}", ch, self.line_num),
-                        )
-                        .process();
-                        return None;
+                        return Err(CompileError::compile_stage_error(&format!(
+                            "转义字符后为空: {}: line {}",
+                            ch, self.line_num
+                        )));
                     });
 
                     self.move_char();
@@ -199,13 +191,10 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                     self.move_char()
                 }
             } else {
-                CompileError::new(
-                    CompileErrorLevel::Error,
-                    CompileStage::Compile,
-                    &format!("引号不闭合: line {}", self.line_num),
-                )
-                .process();
-                return None;
+                return Err(CompileError::compile_stage_error(&format!(
+                    "引号不闭合: line {}",
+                    self.line_num
+                )));
             }
         }
 
@@ -213,41 +202,51 @@ impl<I: Iterator<Item = char>> LexParser<I> {
         self.move_char();
 
         if start == '\'' {
-            assert!(s.chars().count() == 1);
-            Some(Token::Cvar(ConstVar::Char(s.chars().next().unwrap())))
+            if s.chars().count() != 3 {
+                Err(CompileError::compile_stage_error("常量字符长度大于1"))
+            } else {
+                Ok(Token::Cvar(ConstVar::Char(s.chars().nth(1).unwrap())))
+            }
         } else {
-            Some(Token::Cvar(ConstVar::String(s)))
+            assert!(start == '\"');
+            Ok(Token::Cvar(ConstVar::String(
+                s[1..(s.len() - 1)].to_string(),
+            )))
         }
     }
 
-    fn parse_num(&mut self, start: char) -> Option<Token> {
+    fn parse_num(&mut self, start: char) -> Result<Token, CompileError> {
         let mut s = start.to_string();
         self.move_char();
+
         while let Some(ch) = self.current_char().filter(char::is_ascii_digit) {
             s.push(ch);
             self.move_char();
         }
-        if self.current_char().unwrap() == '.' {
+        if self.current_char().filter(|c| *c == '.').is_some() {
             s.push('.');
+            self.move_char();
             while let Some(ch) = self.current_char().filter(char::is_ascii_digit) {
                 s.push(ch);
                 self.move_char();
             }
         }
 
-        let int_var: i32 = s.parse().unwrap();
+        let int_var = s
+            .parse::<f64>()
+            .map_err(|e| CompileError::compile_stage_error(&e.to_string()))?;
 
-        Some(Token::Cvar(ConstVar::Int(int_var)))
+        Ok(Token::Cvar(ConstVar::Int(int_var as i32)))
     }
 
-    fn parse_identifier(&mut self, start: char) -> Option<Token> {
-        fn ok(c: &char) -> bool {
-            matches!(c, 'a'..='z' | 'A'..='Z' | '_' | '0'..='9')
-        }
-
+    fn parse_identifier(&mut self, start: char) -> Token {
         let mut s = start.to_string();
         self.move_char();
-        while let Some(ch) = self.current_char().filter(ok) {
+
+        while let Some(ch) = self
+            .current_char()
+            .filter(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '_' | '0'..='9'))
+        {
             s.push(ch);
             self.move_char();
         }
@@ -256,18 +255,20 @@ impl<I: Iterator<Item = char>> LexParser<I> {
             .entry(s.clone())
             .or_insert(Token::Ident(s.clone()));
 
-        self.word_table.get(&s).cloned()
+        self.word_table.get(&s).cloned().unwrap()
     }
 
-    fn preprocess(&mut self) {
+    fn preprocess(&mut self) -> Result<(), CompileError> {
+        let mut ret = Ok(());
+
         if self.current_char().is_some() {
             loop {
-                if WHITE_SPACE_CHARS.contains(&self.current_char().unwrap()) {
-                    self.skip_space();
+                if self.current_char().filter(|c| is_white_space!(c)).is_some() {
+                    self.skip_white_space();
                 } else if self.current_char().filter(|c| *c == '/').is_some() {
                     self.move_char();
                     if self.current_char().filter(|c| *c == '*').is_some() {
-                        self.parse_comment();
+                        ret = self.parse_comment();
                     } else {
                         self.temp_queue.push_back(self.current_char());
                         self.ch = Some('/');
@@ -278,9 +279,11 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                 }
             }
         }
+
+        ret
     }
 
-    fn parse_comment(&mut self) {
+    fn parse_comment(&mut self) -> Result<(), CompileError> {
         self.move_char();
         loop {
             while self
@@ -297,82 +300,22 @@ impl<I: Iterator<Item = char>> LexParser<I> {
                 self.move_char();
                 if self.current_char().filter(|c| *c == '/').is_some() {
                     self.move_char();
-                    return;
+                    return Ok(());
                 }
             } else {
-                CompileError::new(
-                    CompileErrorLevel::Error,
-                    CompileStage::Compile,
+                return Err(CompileError::compile_stage_error(
                     "一直到文件尾未看到配对的注释结束符",
-                )
-                .process();
-                return;
+                ));
             }
         }
     }
 
-    fn skip_space(&mut self) {
-        while let Some(ch) = self
-            .current_char()
-            .filter(|c| WHITE_SPACE_CHARS.contains(c))
-        {
-            self.move_char();
+    fn skip_white_space(&mut self) {
+        while let Some(ch) = self.current_char().filter(|c| is_white_space!(c)) {
             if ch == '\n' {
                 self.line_num += 1;
             }
-            print!("{ch}")
+            self.move_char();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::io::Write;
-    use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
-
-    #[test]
-    fn test_lex_parser() {
-        let s = std::fs::read_to_string("x.c").unwrap();
-
-        let mut stdout = StandardStream::stdout(ColorChoice::Always);
-        let mut lex_parse = LexParser::new(s.chars());
-
-        while let Some(token) = lex_parse.next_token() {
-            let color = match token {
-                Token::Op(_) => Color::Red,
-                Token::Sep(_) => Color::Red,
-                Token::Cvar(_) => Color::Yellow,
-                Token::Kw(_) => Color::Green,
-                Token::Ident(_) => Color::White,
-            };
-            stdout
-                .set_color(ColorSpec::new().set_fg(Some(color)))
-                .unwrap();
-            match token {
-                Token::Cvar(ConstVar::String(s)) => {
-                    for ch in s.chars() {
-                        let s = ch.to_string();
-                        write!(
-                            &mut stdout,
-                            "{}",
-                            match ch {
-                                '\0' => "\\0",
-                                '\t' => "\\t",
-                                '\n' => "\\n",
-                                '\r' => "\\r",
-                                '\\' => "\\\\",
-                                _ => &s,
-                            }
-                        )
-                        .unwrap()
-                    }
-                }
-                _ => write!(&mut stdout, "{}", token.get_string()).unwrap(),
-            }
-        }
-        stdout.set_color(ColorSpec::new().set_fg(None)).unwrap();
-        println!("\n");
     }
 }
